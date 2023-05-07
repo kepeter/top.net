@@ -1,0 +1,130 @@
+﻿using Microsoft.Extensions.Configuration;
+using Mono.Unix.Native;
+using System.Collections.Immutable;
+using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Runtime.Serialization;
+using System.Security.Principal;
+
+namespace top.net;
+
+internal class Program
+{
+    internal static bool isWindows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+#pragma warning disable CA1416
+    internal static bool isWindowAdministrator => new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+#pragma warning restore CA1416
+    internal static bool isNixAdministrator => Syscall.geteuid() == 0;
+    internal static bool isAdministrator => isWindows ? isWindowAdministrator : isNixAdministrator;
+
+    internal static Dictionary<string, string> validArguments = new Dictionary<string, string>()
+    {
+        { "version", "Displays the version in MAJOR.MINOR.BUILD format." },
+        { "help", "Displays this help screen." },
+        { "-v", "version" },
+        { "-h", "help" },
+    };
+
+    internal class Settings
+    {
+        public bool help { get; set; }
+        public bool version { get; set; }
+        [DataMember(Name = "full-screen")]
+        public bool fullScreen { get; set; }
+    }
+
+    internal static IConfiguration configurationRoot = null;
+    internal static Settings settings = new Settings();
+
+    internal static string getVersion => $"{Assembly.GetEntryAssembly().GetName().Version.Major}.{Assembly.GetEntryAssembly().GetName().Version.Minor}.{Assembly.GetEntryAssembly().GetName().Version.Build}";
+    internal static string getName => $"{Assembly.GetEntryAssembly().GetName().Name.ToLower()}";
+
+    static int Main(string[] args)
+    {
+        if (!isAdministrator)
+        {
+            Console.WriteLine($"{getName} v{getVersion}");
+            Console.WriteLine("Run this application as administrator!");
+
+            return (0);
+        }
+
+        try
+        {
+            configurationRoot = new ConfigurationBuilder()
+                .AddCommandLineArgs(args, validArguments)
+                .Build();
+        }
+        catch (InvalidCommandLineArgException ex)
+        {
+            Console.WriteLine($"The command-line parameter '{ex.argName}' is invalid...");
+
+            return (-1);
+        }
+
+        ArgumentBinding.Bind(configurationRoot, settings);
+
+        if (settings.help)
+        {
+            printHelp();
+        }
+        else if (settings.version)
+        {
+            Console.WriteLine(getVersion);
+        }
+        else
+        {
+            Process[] processes = Process.GetProcesses();
+
+            foreach(Process process in processes)
+            {
+                if ((process.Id != 0) &&
+                    !process.HasExited)
+                {
+                    ProcessModule mainModule = null;
+                    
+                    try { mainModule = process.MainModule; } catch { };
+
+                    Console.WriteLine($"{process.ProcessName}\t{mainModule?.FileVersionInfo.FileDescription}");
+                }
+            }
+        }
+
+        return (0);
+    }
+
+    static void printHelp()
+    {
+        Console.WriteLine($"{getName} v{getVersion}");
+        Console.WriteLine("Usage:");
+
+        foreach (KeyValuePair<string, string> argument in validArguments.ToImmutableSortedDictionary())
+        {
+            if (argument.Key.StartsWith("-"))
+            {
+                continue;
+            }
+            else
+            {
+                KeyValuePair<string, string>[] shorthandArgs = validArguments.Where(arg => (arg.Value != null && (arg.Value.ToLower() == argument.Key.ToLower()))).ToArray();
+
+                Console.Write($"\t--{argument.Key}");
+
+                foreach (KeyValuePair<string, string> shorthandArgument in shorthandArgs)
+                {
+                    Console.Write($", {shorthandArgument.Key}");
+                }
+
+                Console.WriteLine();
+
+                string[] lines = argument.Value.Split("\r");
+
+                foreach (string line in lines)
+                {
+                    Console.WriteLine($"\t\t\t{line}");
+                }
+            }
+        }
+    }
+}
