@@ -28,6 +28,10 @@ internal class ArgumentBinding
                 {
                     prop.SetValue(settings, true);
                 }
+                else if((prop.PropertyType).IsEnum)
+                {
+                    prop.SetValue(settings, Enum.Parse(prop.PropertyType, argument.Value, true));
+                }
                 else
                 {
                     prop.SetValue(settings, argument.Value);

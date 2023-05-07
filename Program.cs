@@ -20,18 +20,28 @@ internal class Program
 
     internal static Dictionary<string, string> validArguments = new Dictionary<string, string>()
     {
+        { "memory-units", "The units to use display memory usage.\rValues: KB, MB, KiB, MiB\rDefault: KiB"},
         { "version", "Displays the version in MAJOR.MINOR.BUILD format." },
         { "help", "Displays this help screen." },
+        { "-m", "memory-units" },
         { "-v", "version" },
         { "-h", "help" },
     };
+
+    internal enum MemoryUnits
+    {
+        KB  = 1000,
+        KiB = 1024,
+        MB  = 1000000,
+        MiB = 1048576
+    }
 
     internal class Settings
     {
         public bool help { get; set; }
         public bool version { get; set; }
-        [DataMember(Name = "full-screen")]
-        public bool fullScreen { get; set; }
+        [DataMember(Name = "memory-units")]
+        public MemoryUnits memoryUnits { get; set; } = MemoryUnits.KiB;
     }
 
     internal static IConfiguration configurationRoot = null;
