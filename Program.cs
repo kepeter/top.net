@@ -1,11 +1,13 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Mono.Unix.Native;
+using System.Collections;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Security.Principal;
+using Terminal.Gui;
 
 namespace top.net;
 
@@ -30,9 +32,9 @@ internal class Program
 
     internal enum MemoryUnits
     {
-        KB  = 1000,
+        KB = 1000,
         KiB = 1024,
-        MB  = 1000000,
+        MB = 1000000,
         MiB = 1048576
     }
 
@@ -44,8 +46,52 @@ internal class Program
         public MemoryUnits memoryUnits { get; set; } = MemoryUnits.KiB;
     }
 
+    internal class ProcessInfo
+    {
+        public int Id { get; set; }
+        public string Description { get; set; }
+        public string Executable { get; set; }
+        public string Origin { get; set; }
+        public TimeSpan ProcessorTime { get; set; }
+    }
+
+    internal class ProcessInfoList : IListDataSource
+    {
+        public ProcessInfoList() { }
+
+        public List<ProcessInfo> Data { get; set; } = new List<ProcessInfo>();
+        private Dictionary<int, bool> Mark = new Dictionary<int, bool>();
+
+        public int Count => Data.Count;
+
+        public int Length => Data.Count;
+
+        public bool IsMarked(int item)
+        {
+            return (Mark.ContainsKey(item) ? Mark[item] : false);
+        }
+
+        public void Render(ListView container, ConsoleDriver driver, bool selected, int item, int col, int line, int width, int start = 0)
+        {
+            driver.AddStr(string.Format("{0,6:######} | {1} | {2}", Data[item].Id, Data[item].ProcessorTime, Data[item].Description));
+        }
+
+        public void SetMark(int item, bool value)
+        {
+            Mark[item] = value;
+        }
+
+        IList IListDataSource.ToList()
+        {
+            return (Data);
+        }
+    }
+
     internal static IConfiguration configurationRoot = null;
     internal static Settings settings = new Settings();
+
+    internal static ProcessInfoList processInfoList = new ProcessInfoList();
+    internal static List<ProcessInfo> oldProcessInfoList = new List<ProcessInfo>();
 
     internal static string getVersion => $"{Assembly.GetEntryAssembly().GetName().Version.Major}.{Assembly.GetEntryAssembly().GetName().Version.Minor}.{Assembly.GetEntryAssembly().GetName().Version.Build}";
     internal static string getName => $"{Assembly.GetEntryAssembly().GetName().Name.ToLower()}";
@@ -85,20 +131,27 @@ internal class Program
         }
         else
         {
-            Process[] processes = Process.GetProcesses();
+            Application.Init();
 
-            foreach(Process process in processes)
+            ListView listView = new ListView(processInfoList) { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+
+            loadProcessInfo();
+
+            Application.Top.Add(listView);
+
+            Task.Run(() =>
             {
-                if ((process.Id != 0) &&
-                    !process.HasExited)
+                while (true)
                 {
-                    ProcessModule mainModule = null;
-                    
-                    try { mainModule = process.MainModule; } catch { };
+                    loadProcessInfo();
 
-                    Console.WriteLine($"{process.ProcessName}\t{mainModule?.FileVersionInfo.FileDescription}");
+                    Application.MainLoop.Invoke(() => listView.SetNeedsDisplay());
+
+                    Thread.Sleep(1000);
                 }
-            }
+            });
+
+            Application.Run();
         }
 
         return (0);
@@ -136,5 +189,40 @@ internal class Program
                 }
             }
         }
+    }
+
+    static void loadProcessInfo()
+    {
+        processInfoList.Data.Clear();
+
+        Process[] processes = Process.GetProcesses();
+
+        foreach (Process process in processes)
+        {
+            if ((process.Id != 0) && !process.HasExited)
+            {
+                Exception exception = null;
+                ProcessModule mainModule = null;
+
+                try { mainModule = process.MainModule; } catch (Exception ex) { exception = ex; };
+
+                ProcessInfo oldProcess = oldProcessInfoList.SingleOrDefault(p => p.Id == process.Id);
+
+                if ((oldProcess == null) || ((oldProcess != null) && (process.TotalProcessorTime.CompareTo(oldProcess.ProcessorTime) != 0)))
+                {
+                    processInfoList.Data.Add(new ProcessInfo()
+                    {
+                        Id = process.Id,
+                        Executable = mainModule == null ? process.ProcessName : Path.GetFileNameWithoutExtension(mainModule.FileName),
+                        Origin = mainModule == null ? null : Path.GetFullPath(mainModule.FileName),
+                        Description = mainModule == null ? $"({exception.Message})" : mainModule.FileVersionInfo.FileDescription,
+                        ProcessorTime = process.TotalProcessorTime,
+                    });
+                }
+            }
+        }
+
+        oldProcessInfoList.Clear();
+        oldProcessInfoList.AddRange(processInfoList.Data);
     }
 }
